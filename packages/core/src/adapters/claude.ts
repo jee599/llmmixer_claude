@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process'
-import { execFile } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { AgentAdapter } from './base.js'
 import type { AgentType, SpawnOptions } from '../types.js'
 
@@ -17,9 +16,13 @@ export class ClaudeAdapter extends AgentAdapter {
   ]
 
   spawn(prompt: string, options: SpawnOptions): void {
-    const args = options.autoApprove
-      ? ['--dangerously-skip-permissions']
-      : []
+    // -p (print) 모드: 프롬프트를 인수로 전달, stdout으로 결과 출력
+    // 대화형 모드는 PTY 필요 → 향후 node-pty로 전환 예정
+    const args = ['-p', prompt]
+
+    if (options.autoApprove) {
+      args.unshift('--dangerously-skip-permissions')
+    }
 
     this.proc = spawn(this.command, args, {
       cwd: options.worktreePath,
@@ -38,11 +41,6 @@ export class ClaudeAdapter extends AgentAdapter {
       this.emit('output', `Error: ${err.message}\n`)
       this.setStatus('error')
     })
-
-    // 프롬프트를 stdin으로 전달
-    if (this.proc.stdin) {
-      this.proc.stdin.write(prompt + '\n')
-    }
   }
 
   async isInstalled(): Promise<boolean> {

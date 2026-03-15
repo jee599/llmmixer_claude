@@ -30,10 +30,14 @@ export async function GET() {
         }
       }
 
+      // SessionManager: output, status, waiting, error 이벤트
       onSessionSSE = (event: SSEEvent) => send(event)
-      onWorkflowSSE = (event: SSEEvent) => send(event)
-
       sessionManager.on('sse', onSessionSSE)
+
+      // WorkflowEngine: workflow 타입 이벤트만 (나머지는 SessionManager에서 이미 전송)
+      onWorkflowSSE = (event: SSEEvent) => {
+        if (event.type === 'workflow') send(event)
+      }
       workflowEngine.on('sse', onWorkflowSSE)
 
       // 초기 상태 전송

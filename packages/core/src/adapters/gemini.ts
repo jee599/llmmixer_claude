@@ -13,9 +13,12 @@ export class GeminiAdapter extends AgentAdapter {
   ]
 
   spawn(prompt: string, options: SpawnOptions): void {
-    const args = options.autoApprove
-      ? ['--sandbox=none']
-      : []
+    // -p (prompt) 모드
+    const args = ['-p', prompt]
+
+    if (options.autoApprove) {
+      args.unshift('--sandbox=none')
+    }
 
     this.proc = spawn(this.command, args, {
       cwd: options.worktreePath,
@@ -34,10 +37,6 @@ export class GeminiAdapter extends AgentAdapter {
       this.emit('output', `Error: ${err.message}\n`)
       this.setStatus('error')
     })
-
-    if (this.proc.stdin) {
-      this.proc.stdin.write(prompt + '\n')
-    }
   }
 
   async isInstalled(): Promise<boolean> {

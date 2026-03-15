@@ -3,32 +3,32 @@ import { generateToken, loadToken } from '@llmmixer/core'
 
 const PROJECT_PATH = process.cwd()
 
-let sessionManager: SessionManager | null = null
-let workflowEngine: WorkflowEngine | null = null
-let sessionToken: string | null = null
+// Next.js dev 모드에서 핫 리로드 시 인스턴스 유지
+const globalForMixer = globalThis as typeof globalThis & {
+  __mixerSessionManager?: SessionManager
+  __mixerWorkflowEngine?: WorkflowEngine
+  __mixerToken?: string
+}
 
 export function getSessionManager(): SessionManager {
-  if (!sessionManager) {
-    sessionManager = new SessionManager(PROJECT_PATH)
+  if (!globalForMixer.__mixerSessionManager) {
+    globalForMixer.__mixerSessionManager = new SessionManager(PROJECT_PATH)
   }
-  return sessionManager
+  return globalForMixer.__mixerSessionManager
 }
 
 export function getWorkflowEngine(): WorkflowEngine {
-  if (!workflowEngine) {
-    workflowEngine = new WorkflowEngine(PROJECT_PATH, getSessionManager())
+  if (!globalForMixer.__mixerWorkflowEngine) {
+    globalForMixer.__mixerWorkflowEngine = new WorkflowEngine(PROJECT_PATH, getSessionManager())
   }
-  return workflowEngine
+  return globalForMixer.__mixerWorkflowEngine
 }
 
 export function getOrCreateToken(): string {
-  if (!sessionToken) {
-    sessionToken = loadToken(PROJECT_PATH)
-    if (!sessionToken) {
-      sessionToken = generateToken(PROJECT_PATH)
-    }
+  if (!globalForMixer.__mixerToken) {
+    globalForMixer.__mixerToken = loadToken(PROJECT_PATH) ?? generateToken(PROJECT_PATH)
   }
-  return sessionToken
+  return globalForMixer.__mixerToken
 }
 
 export function getProjectPath(): string {

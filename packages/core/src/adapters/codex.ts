@@ -13,9 +13,14 @@ export class CodexAdapter extends AgentAdapter {
   ]
 
   spawn(prompt: string, options: SpawnOptions): void {
-    const args = options.autoApprove
-      ? ['--approval-mode', 'full-auto']
-      : []
+    // exec (non-interactive) 모드
+    const args = ['exec']
+
+    if (options.autoApprove) {
+      args.push('--config', 'approval=never')
+    }
+
+    args.push(prompt)
 
     this.proc = spawn(this.command, args, {
       cwd: options.worktreePath,
@@ -34,10 +39,6 @@ export class CodexAdapter extends AgentAdapter {
       this.emit('output', `Error: ${err.message}\n`)
       this.setStatus('error')
     })
-
-    if (this.proc.stdin) {
-      this.proc.stdin.write(prompt + '\n')
-    }
   }
 
   async isInstalled(): Promise<boolean> {

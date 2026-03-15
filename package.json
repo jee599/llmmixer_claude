@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "bin": {
-    "llmmixer": "./bin/llmmixer.js"
+    "llmmixer": "./bin/llmmixer.mjs"
   },
   "scripts": {
     "dev": "npm run dev --workspace=packages/dashboard",
