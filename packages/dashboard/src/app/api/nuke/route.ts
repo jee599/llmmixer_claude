@@ -1,8 +1,12 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { nukeWorktrees } from '@llmmixer/core'
 import { getSessionManager, getProjectPath } from '@/lib/mixer-instance'
+import { requireAuth } from '@/lib/auth'
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const authError = requireAuth(req)
+  if (authError) return authError
+
   const manager = getSessionManager()
   const projectPath = getProjectPath()
 

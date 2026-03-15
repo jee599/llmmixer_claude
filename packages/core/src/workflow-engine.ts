@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import type {
   AgentType,
@@ -15,6 +16,10 @@ import { route } from './router.js'
 import { collectContext } from './context.js'
 import { SessionManager } from './session-manager.js'
 import { createWorktree } from './worktree.js'
+
+const __dirname = typeof import.meta.dirname === 'string'
+  ? import.meta.dirname
+  : dirname(fileURLToPath(import.meta.url))
 
 const DEFAULT_CONFIG: MixerConfig = {
   decomposer: 'codex',
@@ -77,7 +82,7 @@ export class WorkflowEngine extends EventEmitter {
 
       if (template === 'auto') {
         const context = collectContext(this.projectPath)
-        tasks = decompose(prompt, context, this.config.decomposer)
+        tasks = await decompose(prompt, context, this.config.decomposer)
       } else {
         tasks = this.loadTemplate(template, prompt)
       }
@@ -104,7 +109,7 @@ export class WorkflowEngine extends EventEmitter {
       content = readFileSync(templatePath, 'utf-8')
     } catch {
       // 패키지 내 기본 템플릿 시도
-      const fallback = join(import.meta.dirname, '..', '..', '..', 'config', 'templates', `${name}.json`)
+      const fallback = join(__dirname, '..', '..', '..', 'config', 'templates', `${name}.json`)
       content = readFileSync(fallback, 'utf-8')
     }
 
@@ -165,6 +170,36 @@ export class WorkflowEngine extends EventEmitter {
     })
 
     this.broadcastWorkflow()
+  }
+
+  /**
+   * 실패한 태스크를 재시도
+   */
+  retryTask(taskId: string): void {
+    if (!this.activeWorkflow) {
+      throw new Error('No active workflow')
+    }
+
+    const task = this.activeWorkflow.tasks.find((t) => t.id === taskId)
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`)
+    }
+    if (task.status !== 'error') {
+      throw new Error(`Task ${taskId} is not in error state (current: ${task.status})`)
+    }
+
+    // 이전 세션 정리
+    this.sessionManager.killSession(taskId)
+
+    // 상태 리셋
+    task.status = 'pending'
+    task.error = undefined
+    task.output = undefined
+    task.startedAt = undefined
+    task.completedAt = undefined
+
+    this.broadcastWorkflow()
+    this.scheduleReady(this.config.autoApprove)
   }
 
   private enrichPrompt(task: Task): string {

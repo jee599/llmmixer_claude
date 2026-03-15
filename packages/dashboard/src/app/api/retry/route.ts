@@ -1,24 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSessionManager } from '@/lib/mixer-instance'
+import { getWorkflowEngine } from '@/lib/mixer-instance'
 import { requireAuth } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   const authError = requireAuth(req)
   if (authError) return authError
 
-  const body = await req.json() as { taskId: string; input: string }
-  const { taskId, input } = body
+  const body = await req.json() as { taskId: string }
+  const { taskId } = body
 
-  if (!taskId || input === undefined) {
-    return NextResponse.json(
-      { error: 'taskId and input are required' },
-      { status: 400 }
-    )
+  if (!taskId) {
+    return NextResponse.json({ error: 'taskId required' }, { status: 400 })
   }
 
-  const manager = getSessionManager()
+  const engine = getWorkflowEngine()
+
   try {
-    manager.approveSession(taskId, input)
+    engine.retryTask(taskId)
     return NextResponse.json({ ok: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'

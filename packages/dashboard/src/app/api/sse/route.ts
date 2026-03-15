@@ -1,9 +1,17 @@
 import type { SSEEvent } from '@llmmixer/core'
-import { getSessionManager, getWorkflowEngine } from '@/lib/mixer-instance'
+import { NextRequest, NextResponse } from 'next/server'
+import { getSessionManager, getWorkflowEngine, getOrCreateToken } from '@/lib/mixer-instance'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const token = searchParams.get('token')
+
+  if (token !== getOrCreateToken()) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const sessionManager = getSessionManager()
   const workflowEngine = getWorkflowEngine()
   const encoder = new TextEncoder()

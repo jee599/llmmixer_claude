@@ -9,12 +9,18 @@ interface ActiveSession {
   info: SessionInfo
   adapter: AgentAdapter
   timeout?: ReturnType<typeof setTimeout>
+  // 세션 종료 후 output 보존
+  cachedOutput?: string
+  cleanupTimeout?: ReturnType<typeof setTimeout>
 }
 
 export class SessionManager extends EventEmitter {
   private sessions = new Map<string, ActiveSession>()
   private projectPath: string
   private saveDebounce: ReturnType<typeof setTimeout> | null = null
+
+  // 종료된 세션의 output을 60초간 보존
+  private static readonly CLEANUP_DELAY_MS = 60000
 
   constructor(projectPath: string) {
     super()
@@ -63,6 +69,13 @@ export class SessionManager extends EventEmitter {
 
     adapter.on('exit', () => {
       if (session.timeout) clearTimeout(session.timeout)
+
+      // output을 캐시하고 지연 정리 예약
+      session.cachedOutput = adapter.getOutput()
+      session.cleanupTimeout = setTimeout(() => {
+        this.sessions.delete(taskId)
+      }, SessionManager.CLEANUP_DELAY_MS)
+
       this.debouncedSave()
     })
 
@@ -94,6 +107,7 @@ export class SessionManager extends EventEmitter {
     const session = this.sessions.get(taskId)
     if (!session) return
     if (session.timeout) clearTimeout(session.timeout)
+    if (session.cleanupTimeout) clearTimeout(session.cleanupTimeout)
     session.adapter.kill()
   }
 
@@ -113,9 +127,18 @@ export class SessionManager extends EventEmitter {
     return Array.from(this.sessions.values()).map((s) => s.info)
   }
 
+  /**
+   * 세션 output 반환. 세션 종료 후에도 캐시된 output 반환 가능.
+   */
   getSessionOutput(taskId: string): string {
     const session = this.sessions.get(taskId)
     if (!session) return ''
+
+    // 종료 후 캐시가 있으면 캐시 반환
+    if (session.cachedOutput !== undefined) {
+      return session.cachedOutput
+    }
+
     return session.adapter.getOutput()
   }
 

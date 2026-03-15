@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, rmSync, symlinkSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 function git(args: string[], cwd: string): string {
   return execFileSync('git', args, { cwd, encoding: 'utf-8', timeout: 30000 }).trim()
@@ -25,6 +26,9 @@ export function createWorktree(projectPath: string, taskId: string): string {
       throw new Error(`Failed to create worktree: ${err instanceof Error ? err.message : 'unknown'}`)
     }
   }
+
+  // CLI 인증 config를 worktree에 심링크 (Gemini, Claude 등의 per-project 인증 문제 방지)
+  linkCliConfigs(worktreePath, projectPath)
 
   return worktreePath
 }
@@ -134,5 +138,31 @@ export function nukeWorktrees(projectPath: string): void {
     }
   } catch {
     // ignore
+  }
+}
+
+function linkCliConfigs(worktreePath: string, projectPath: string): void {
+  const home = homedir()
+
+  const configs = [
+    { src: join(projectPath, '.gemini'), dest: join(worktreePath, '.gemini') },
+    { src: join(projectPath, '.claude'), dest: join(worktreePath, '.claude') },
+  ]
+
+  for (const { src, dest } of configs) {
+    if (existsSync(src) && !existsSync(dest)) {
+      try {
+        symlinkSync(src, dest)
+      } catch { /* ignore */ }
+    }
+  }
+
+  // 글로벌 ~/.gemini를 worktree에서도 참조
+  const globalGemini = join(home, '.gemini')
+  const localGemini = join(worktreePath, '.gemini')
+  if (existsSync(globalGemini) && !existsSync(localGemini)) {
+    try {
+      symlinkSync(globalGemini, localGemini)
+    } catch { /* ignore */ }
   }
 }

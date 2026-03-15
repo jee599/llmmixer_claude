@@ -118,7 +118,7 @@ export default function DagGraph({ tasks, onNodeClick }: DagGraphProps) {
   }
 
   return (
-    <svg width={width} height={height} className="w-full h-full">
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMinYMin meet">
       <defs>
         <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
           <polygon points="0 0, 8 3, 0 6" fill="#6B7280" />

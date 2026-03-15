@@ -43,10 +43,32 @@ export function useSSE(autoApprove: boolean) {
   const [sessions, setSessions] = useState<SessionStatus[]>([])
   const [waitingMap, setWaitingMap] = useState<Map<string, WaitingInfo>>(new Map())
   const [workflow, setWorkflow] = useState<WorkflowData | null>(null)
+  const [token, setToken] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
+  const autoApproveRef = useRef(autoApprove)
 
+  // autoApprove 최신 값을 ref에 유지 (SSE 재연결 방지)
   useEffect(() => {
-    const es = new EventSource('/api/sse')
+    autoApproveRef.current = autoApprove
+  }, [autoApprove])
+
+  // 토큰 fetch
+  useEffect(() => {
+    fetch('/api/token')
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (data?.token) setToken(data.token)
+      })
+      .catch(() => {
+        // token fetch 실패 시 무시 — SSE 연결 불가
+      })
+  }, [])
+
+  // SSE 연결 (token이 준비된 후에만)
+  useEffect(() => {
+    if (!token) return
+
+    const es = new EventSource(`/api/sse?token=${token}`)
     esRef.current = es
 
     es.onmessage = (e) => {
@@ -81,10 +103,13 @@ export function useSSE(autoApprove: boolean) {
           break
 
         case 'waiting':
-          if (autoApprove) {
+          if (autoApproveRef.current) {
             fetch('/api/approve', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
               body: JSON.stringify({ taskId: event.taskId, input: 'y' }),
             })
           } else {
@@ -106,7 +131,7 @@ export function useSSE(autoApprove: boolean) {
       es.close()
       esRef.current = null
     }
-  }, [autoApprove])
+  }, [token])
 
   const clearWaiting = useCallback((taskId: string) => {
     setWaitingMap((prev) => {
@@ -123,5 +148,5 @@ export function useSSE(autoApprove: boolean) {
     setWorkflow(null)
   }, [])
 
-  return { logs, sessions, waitingMap, workflow, setWorkflow, clearWaiting, clearAll }
+  return { logs, sessions, waitingMap, workflow, setWorkflow, clearWaiting, clearAll, token }
 }

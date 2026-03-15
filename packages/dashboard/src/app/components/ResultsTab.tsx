@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 interface TaskResult {
   id: string
@@ -37,9 +37,49 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds % 60}s`
 }
 
+function DiffBlock({ diff }: { diff: string }) {
+  return (
+    <pre className="bg-gray-950 rounded p-3 text-xs overflow-x-auto max-h-80 overflow-y-auto font-mono leading-relaxed">
+      {diff.split('\n').map((line, i) => {
+        let color = 'text-gray-500'
+        if (line.startsWith('+') && !line.startsWith('+++')) color = 'text-green-400'
+        else if (line.startsWith('-') && !line.startsWith('---')) color = 'text-red-400'
+        else if (line.startsWith('@@')) color = 'text-blue-400'
+        else if (line.startsWith('diff ') || line.startsWith('index ')) color = 'text-gray-600'
+        return (
+          <span key={i} className={color}>
+            {line}
+            {'\n'}
+          </span>
+        )
+      })}
+    </pre>
+  )
+}
+
 export default function ResultsTab({ workflow }: ResultsTabProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [merging, setMerging] = useState<string | null>(null)
+  const [diffs, setDiffs] = useState<Record<string, string>>({})
+  const [diffLoading, setDiffLoading] = useState<string | null>(null)
+
+  // 카드 확장 시 diff fetch
+  useEffect(() => {
+    if (!expandedId || diffs[expandedId] !== undefined) return
+
+    setDiffLoading(expandedId)
+    fetch(`/api/diff?taskId=${expandedId}`)
+      .then((res) => res.ok ? res.json() : { diff: '' })
+      .then((data) => {
+        setDiffs((prev) => ({ ...prev, [expandedId]: data.diff ?? '' }))
+      })
+      .catch(() => {
+        setDiffs((prev) => ({ ...prev, [expandedId]: '' }))
+      })
+      .finally(() => {
+        setDiffLoading(null)
+      })
+  }, [expandedId, diffs])
 
   const handleMerge = useCallback(async (taskId: string) => {
     setMerging(taskId)
@@ -83,11 +123,11 @@ export default function ResultsTab({ workflow }: ResultsTabProps) {
           <span className="text-gray-400">
             {completedTasks.length}/{workflow.tasks.length} tasks done
           </span>
-          <span className="text-gray-600">·</span>
+          <span className="text-gray-600">&middot;</span>
           <span className="text-gray-400">
             Total: {formatDuration(totalDuration)}
           </span>
-          <span className="text-gray-600">·</span>
+          <span className="text-gray-600">&middot;</span>
           <span className={workflow.status === 'complete' ? 'text-green-400' : workflow.status === 'error' ? 'text-red-400' : 'text-blue-400'}>
             {workflow.status}
           </span>
@@ -100,7 +140,7 @@ export default function ResultsTab({ workflow }: ResultsTabProps) {
           const isExpanded = expandedId === task.id
           const duration = task.startedAt && task.completedAt
             ? formatDuration(task.completedAt - task.startedAt)
-            : '—'
+            : '\u2014'
 
           return (
             <div
@@ -114,7 +154,7 @@ export default function ResultsTab({ workflow }: ResultsTabProps) {
               >
                 <div className="flex items-center gap-3">
                   <span className={`text-xs ${task.status === 'complete' ? 'text-green-400' : task.status === 'error' ? 'text-red-400' : 'text-gray-400'}`}>
-                    {task.status === 'complete' ? '✓' : task.status === 'error' ? '✗' : '○'}
+                    {task.status === 'complete' ? '\u2713' : task.status === 'error' ? '\u2717' : '\u25CB'}
                   </span>
                   <span className="text-sm font-medium text-gray-200">{task.id}</span>
                   <span className="text-xs text-gray-500">{task.type}</span>
@@ -122,7 +162,7 @@ export default function ResultsTab({ workflow }: ResultsTabProps) {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-gray-500">{duration}</span>
-                  <span className="text-gray-600">{isExpanded ? '▾' : '▸'}</span>
+                  <span className="text-gray-600">{isExpanded ? '\u25BE' : '\u25B8'}</span>
                 </div>
               </button>
 
@@ -142,6 +182,18 @@ export default function ResultsTab({ workflow }: ResultsTabProps) {
                       </pre>
                     </div>
                   )}
+
+                  {/* Git diff */}
+                  <div className="mb-3">
+                    <p className="text-xs text-gray-500 mb-1">Git Diff</p>
+                    {diffLoading === task.id ? (
+                      <div className="text-xs text-gray-500 py-2">Loading diff...</div>
+                    ) : diffs[task.id] ? (
+                      <DiffBlock diff={diffs[task.id]} />
+                    ) : diffs[task.id] === '' ? (
+                      <div className="text-xs text-gray-600 py-2">No diff available</div>
+                    ) : null}
+                  </div>
 
                   <div className="flex gap-2">
                     {task.output && (

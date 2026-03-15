@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 
 type AgentType = 'claude' | 'codex' | 'gemini'
 type Mode = 'single' | 'workflow'
-type TemplateName = 'auto' | 'full' | 'quick' | 'review' | 'docs'
+type TemplateName = 'auto' | 'full' | 'quick' | 'review' | 'docs' | 'custom'
 
 interface PromptInputProps {
   mode: Mode

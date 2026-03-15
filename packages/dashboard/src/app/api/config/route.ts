@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { getProjectPath } from '@/lib/mixer-instance'
+import { requireAuth } from '@/lib/auth'
 
 const DEFAULT_CONFIG = {
   decomposer: 'claude',
@@ -38,6 +39,9 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
+  const authError = requireAuth(req)
+  if (authError) return authError
+
   const body = await req.json() as { config?: Record<string, unknown>; routing?: Record<string, unknown> }
   const projectPath = getProjectPath()
   const mixerDir = join(projectPath, '.mixer')

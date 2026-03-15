@@ -24,6 +24,12 @@ function generateTaskId(agentType: string): string {
   return `${agentType}-${ts}-${rand}`
 }
 
+function authHeaders(token: string | null): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  return headers
+}
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabName>('log')
   const [isRunning, setIsRunning] = useState(false)
@@ -32,20 +38,32 @@ export default function Dashboard() {
   const [autoApprove, setAutoApprove] = useState(false)
   const [statusMessage, setStatusMessage] = useState<{ type: 'info' | 'error'; text: string } | null>(null)
 
-  const { logs, sessions, waitingMap, workflow, setWorkflow, clearWaiting, clearAll } = useSSE(autoApprove)
+  const { logs, sessions, waitingMap, workflow, setWorkflow, clearWaiting, clearAll, token } = useSSE(autoApprove)
 
   const handleApprove = useCallback(async (taskId: string, input: string) => {
-    await fetch('/api/approve', {
+    const res = await fetch('/api/approve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(token),
       body: JSON.stringify({ taskId, input }),
     })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Request failed' }))
+      setStatusMessage({ type: 'error', text: data.error ?? `Approve failed (${res.status})` })
+      return
+    }
     clearWaiting(taskId)
-  }, [clearWaiting])
+  }, [clearWaiting, token])
 
   const handleKill = useCallback(async (taskId: string) => {
-    await fetch(`/api/sessions?taskId=${taskId}`, { method: 'DELETE' })
-  }, [])
+    const res = await fetch(`/api/sessions?taskId=${taskId}`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Request failed' }))
+      setStatusMessage({ type: 'error', text: data.error ?? `Kill failed (${res.status})` })
+    }
+  }, [token])
 
   const handleSubmit = useCallback(async (prompt: string, agentType: AgentType) => {
     setIsRunning(true)
@@ -58,9 +76,15 @@ export default function Dashboard() {
       try {
         const res = await fetch('/api/workflow', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(token),
           body: JSON.stringify({ prompt, template, autoApprove }),
         })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+          setStatusMessage({ type: 'error', text: data.error ?? `Workflow failed (${res.status})` })
+          setIsRunning(false)
+          return
+        }
         const data = await res.json()
         if (data.error) {
           setStatusMessage({ type: 'error', text: data.error })
@@ -79,9 +103,15 @@ export default function Dashboard() {
       try {
         const res = await fetch('/api/sessions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(token),
           body: JSON.stringify({ taskId, agentType, prompt, autoApprove }),
         })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+          setStatusMessage({ type: 'error', text: data.error ?? `Session start failed (${res.status})` })
+          setIsRunning(false)
+          return
+        }
         const data = await res.json()
         if (data.error) {
           setStatusMessage({ type: 'error', text: data.error })
@@ -95,14 +125,22 @@ export default function Dashboard() {
     }
 
     setIsRunning(false)
-  }, [mode, template, autoApprove, setWorkflow])
+  }, [mode, template, autoApprove, setWorkflow, token])
 
   const handleNuke = useCallback(async () => {
     if (!confirm('Kill all sessions and clean up?')) return
-    await fetch('/api/nuke', { method: 'POST' })
+    const res = await fetch('/api/nuke', {
+      method: 'POST',
+      headers: authHeaders(token),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Request failed' }))
+      setStatusMessage({ type: 'error', text: data.error ?? `Nuke failed (${res.status})` })
+      return
+    }
     clearAll()
     setStatusMessage(null)
-  }, [clearAll])
+  }, [clearAll, token])
 
   // 활성 세션 수
   const runningSessions = sessions.filter((s) => s.status === 'running' || s.status === 'waiting').length
@@ -161,13 +199,13 @@ export default function Dashboard() {
           {statusMessage.type === 'info' && isRunning && (
             <span className="inline-block w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
           )}
-          {statusMessage.type === 'error' && <span>✗</span>}
+          {statusMessage.type === 'error' && <span>&#10007;</span>}
           {statusMessage.text}
           <button
             onClick={() => setStatusMessage(null)}
             className="ml-auto text-xs opacity-50 hover:opacity-100"
           >
-            ✕
+            &#10005;
           </button>
         </div>
       )}

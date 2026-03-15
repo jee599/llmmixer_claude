@@ -22,38 +22,79 @@ export class ClaudeAdapter extends AgentAdapter {
     /permission/i,
   ]
 
-  spawn(prompt: string, options: SpawnOptions): void {
-    if (!pty) {
-      this.emit('output', 'Error: node-pty not installed\n')
-      this.setStatus('error')
-      return
-    }
+  private readyAccum = ''
+  private promptDelivered = false
+  private readyTimeout: ReturnType<typeof setTimeout> | null = null
 
+  spawn(prompt: string, options: SpawnOptions): void {
     this.autoApprove = options.autoApprove
+    this.readyAccum = ''
+    this.promptDelivered = false
 
     const args: string[] = []
     if (options.autoApprove) {
       args.push('--dangerously-skip-permissions')
     }
 
-    const proc = pty.spawn(this.command, args, {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 40,
-      cwd: options.worktreePath,
-      env: process.env as Record<string, string>,
-    })
+    if (pty) {
+      const proc = pty.spawn(this.command, args, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 40,
+        cwd: options.worktreePath,
+        env: process.env as Record<string, string>,
+      })
 
-    this.ptyProcess = proc
-    this.setStatus('running')
+      this.ptyProcess = proc
+      this.setStatus('running')
 
-    // 프롬프트 전달 — Claude가 초기화된 후 전송
-    setTimeout(() => {
-      proc.write(prompt + '\n')
-    }, 2000)
+      proc.onData((data: string) => {
+        this.handleOutput(data)
+        this.detectReadyAndSend(prompt, data)
+      })
 
-    proc.onData((data: string) => this.handleOutput(data))
-    proc.onExit(({ exitCode }: { exitCode: number }) => this.handleExit(exitCode))
+      proc.onExit(({ exitCode }: { exitCode: number }) => {
+        if (this.readyTimeout) clearTimeout(this.readyTimeout)
+        this.handleExit(exitCode)
+      })
+
+      // 최대 10초 후 강제 전송
+      this.readyTimeout = setTimeout(() => {
+        this.deliverPrompt(prompt)
+      }, 10000)
+    } else {
+      // child_process fallback: -p 플래그로 프롬프트 직접 전달
+      const cpArgs = [...args, '-p', prompt]
+      this.spawnChildProcess(this.command, cpArgs, options)
+    }
+  }
+
+  private detectReadyAndSend(prompt: string, data: string): void {
+    if (this.promptDelivered) return
+
+    const clean = this.stripAnsi(data)
+    this.readyAccum += clean
+
+    // Claude CLI ready 시그널: 프롬프트 표시자 (>, ❯, 또는 빈 줄 후 커서)
+    const readyPattern = /[>❯]\s*$|^\s*$.*\n[>❯]/m
+    if (readyPattern.test(this.readyAccum)) {
+      this.deliverPrompt(prompt)
+    }
+  }
+
+  private deliverPrompt(prompt: string): void {
+    if (this.promptDelivered) return
+    this.promptDelivered = true
+
+    if (this.readyTimeout) {
+      clearTimeout(this.readyTimeout)
+      this.readyTimeout = null
+    }
+
+    const ptyProc = this.ptyProcess as { write?: (d: string) => void }
+    if (ptyProc?.write) {
+      ptyProc.write(prompt + '\n')
+    }
   }
 
   async isInstalled(): Promise<boolean> {

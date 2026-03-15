@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 
 type AgentType = 'claude' | 'codex' | 'gemini'
 
@@ -38,7 +38,17 @@ interface Routing {
 const TASK_TYPES = ['design', 'review', 'implement', 'scaffold', 'research', 'docs'] as const
 const AGENTS: AgentType[] = ['claude', 'codex', 'gemini']
 
-function CheckItem({ label, check }: { label: string; check: DoctorCheck }) {
+function CheckItem({
+  label,
+  check,
+  agentKey,
+  onAuth,
+}: {
+  label: string
+  check: DoctorCheck
+  agentKey?: AgentType
+  onAuth?: (agent: AgentType) => void
+}) {
   const icon = check.installed ? '✓' : '✗'
   const color = check.installed ? 'text-green-400' : 'text-red-400'
 
@@ -57,6 +67,107 @@ function CheckItem({ label, check }: { label: string; check: DoctorCheck }) {
             {check.authenticated ? 'authenticated' : 'not authenticated'}
           </span>
         )}
+        {agentKey && check.installed && onAuth && (
+          <button
+            onClick={() => onAuth(agentKey)}
+            className="px-2 py-0.5 text-[10px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded transition-colors"
+          >
+            Auth
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AuthTerminal({ agent, onClose }: { agent: AgentType; onClose: () => void }) {
+  const [lines, setLines] = useState<string[]>([])
+  const [input, setInput] = useState('')
+  const [started, setStarted] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // 터미널 시작
+  useEffect(() => {
+    fetch('/api/auth-terminal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent }),
+    }).then(() => {
+      setStarted(true)
+
+      const es = new EventSource(`/api/auth-terminal?agent=${agent}`)
+      es.onmessage = (e) => {
+        const event = JSON.parse(e.data)
+        if (event.type === 'exit') {
+          es.close()
+          return
+        }
+        if (event.data) {
+          setLines((prev) => {
+            const next = [...prev, event.data]
+            return next.length > 300 ? next.slice(-300) : next
+          })
+        }
+      }
+      return () => es.close()
+    })
+  }, [agent])
+
+  useEffect(() => {
+    containerRef.current?.scrollTo(0, containerRef.current.scrollHeight)
+  }, [lines])
+
+  const handleSend = async (text: string) => {
+    await fetch('/api/auth-terminal', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent, input: text }),
+    })
+    setInput('')
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-700 rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700">
+        <span className="text-xs text-gray-300 font-medium">
+          {agent} — authentication terminal
+        </span>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xs">✕</button>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="h-64 overflow-y-auto px-3 py-2 font-mono text-xs text-gray-300 whitespace-pre-wrap"
+      >
+        {!started && <span className="text-gray-600">Starting {agent}...</span>}
+        {lines.map((line, i) => (
+          <span key={i}>{line}</span>
+        ))}
+      </div>
+
+      <div className="border-t border-gray-700 p-2 flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSend(input + '\r')
+          }}
+          placeholder="Type and press Enter..."
+          className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-gray-500"
+        />
+        <button
+          onClick={() => handleSend('\r')}
+          className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded"
+        >
+          Enter
+        </button>
+        <button
+          onClick={() => handleSend('y\r')}
+          className="px-2 py-1 text-xs bg-green-800 hover:bg-green-700 text-green-200 rounded"
+        >
+          Yes
+        </button>
       </div>
     </div>
   )
@@ -68,6 +179,7 @@ export default function SetupTab() {
   const [routing, setRouting] = useState<Routing | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [authAgent, setAuthAgent] = useState<AgentType | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -92,11 +204,14 @@ export default function SetupTab() {
     setSaving(false)
   }, [config, routing])
 
+  const refreshDoctor = useCallback(async () => {
+    const data = await fetch('/api/doctor').then((r) => r.json())
+    setDoctor(data)
+  }, [])
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-600">
-        Loading...
-      </div>
+      <div className="flex items-center justify-center h-full text-gray-600">Loading...</div>
     )
   }
 
@@ -104,15 +219,23 @@ export default function SetupTab() {
     <div className="max-w-2xl mx-auto p-6 space-y-8 overflow-y-auto h-full">
       {/* Doctor */}
       <section>
-        <h2 className="text-lg font-semibold mb-3">Environment</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Environment</h2>
+          <button
+            onClick={refreshDoctor}
+            className="px-2 py-1 text-xs text-gray-400 hover:text-gray-200 border border-gray-700 rounded"
+          >
+            Refresh
+          </button>
+        </div>
         <div className="bg-gray-900 rounded-lg p-4">
           {doctor && (
             <>
               <CheckItem label="Node.js" check={doctor.node} />
               <CheckItem label="Git" check={doctor.git} />
-              <CheckItem label="Claude Code" check={doctor.claude} />
-              <CheckItem label="Codex CLI" check={doctor.codex} />
-              <CheckItem label="Gemini CLI" check={doctor.gemini} />
+              <CheckItem label="Claude Code" check={doctor.claude} agentKey="claude" onAuth={setAuthAgent} />
+              <CheckItem label="Codex CLI" check={doctor.codex} agentKey="codex" onAuth={setAuthAgent} />
+              <CheckItem label="Gemini CLI" check={doctor.gemini} agentKey="gemini" onAuth={setAuthAgent} />
               <div className="mt-3 pt-3 border-t border-gray-800">
                 <p className="text-xs text-gray-500">
                   Available templates:{' '}
@@ -127,6 +250,19 @@ export default function SetupTab() {
           )}
         </div>
       </section>
+
+      {/* 인증 터미널 */}
+      {authAgent && (
+        <section>
+          <AuthTerminal
+            agent={authAgent}
+            onClose={() => {
+              setAuthAgent(null)
+              refreshDoctor()
+            }}
+          />
+        </section>
+      )}
 
       {/* Config */}
       {config && (
@@ -145,7 +281,6 @@ export default function SetupTab() {
                 ))}
               </select>
             </div>
-
             <div className="flex items-center justify-between">
               <label className="text-sm text-gray-300">Max concurrent agents</label>
               <input
@@ -157,7 +292,6 @@ export default function SetupTab() {
                 className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm text-white w-20 text-center"
               />
             </div>
-
             <div className="flex items-center justify-between">
               <label className="text-sm text-gray-300">Timeout (seconds)</label>
               <input

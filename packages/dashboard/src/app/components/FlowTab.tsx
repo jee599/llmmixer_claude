@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import DagGraph from './DagGraph'
 import ApprovalBanner from './ApprovalBanner'
 
@@ -61,6 +61,18 @@ function formatDuration(ms: number): string {
 
 export default function FlowTab({ workflow, waitingMap, onNodeClick, onApprove }: FlowTabProps) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [, setTick] = useState(0)
+
+  // 경과 시간 타이머: 워크플로우 진행 중일 때 매 초 업데이트
+  useEffect(() => {
+    if (!workflow || workflow.completedAt || workflow.status === 'complete' || workflow.status === 'error') return
+
+    const interval = setInterval(() => {
+      setTick((t) => t + 1)
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [workflow?.completedAt, workflow?.status, workflow])
 
   if (!workflow) {
     return (

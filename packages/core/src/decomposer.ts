@@ -1,5 +1,8 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import type { AgentType, Task, TaskType } from './types.js'
+
+const execFileAsync = promisify(execFile)
 
 const VALID_TYPES: TaskType[] = ['design', 'implement', 'review', 'scaffold', 'research', 'docs']
 
@@ -41,17 +44,36 @@ function buildCliCommand(agent: AgentType, prompt: string): string[] {
   }
 }
 
+function stripAnsi(str: string): string {
+  return str
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+}
+
 function parseJsonFromOutput(output: string): DecomposeResult {
+  const clean = stripAnsi(output)
+
   // codex exec 출력에서 실제 응답 부분만 추출 (헤더 제거)
-  // codex 포맷: "--------\nuser\n...\ncodex\n{실제 응답}\ntokens used\n..."
-  const codexMatch = output.match(/codex\n([\s\S]*?)(?:\ntokens used|\n?$)/)
-  const content = codexMatch ? codexMatch[1].trim() : output
+  const codexMatch = clean.match(/codex\n([\s\S]*?)(?:\ntokens used|\n?$)/)
+  const content = codexMatch ? codexMatch[1].trim() : clean
 
-  // ```json 블록 또는 순수 JSON 추출
-  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) ?? content.match(/(\{[\s\S]*\})/)
-  if (!jsonMatch) throw new Error(`No JSON found in LLM output:\n${content.slice(0, 200)}`)
+  // ```json 블록 → 중괄호 JSON → 배열 JSON
+  const jsonMatch =
+    content.match(/```(?:json)?\s*([\s\S]*?)```/) ??
+    content.match(/(\{[\s\S]*\})/) ??
+    content.match(/(\[[\s\S]*\])/)
 
-  return JSON.parse(jsonMatch[1].trim())
+  if (!jsonMatch) throw new Error(`No JSON found in LLM output:\n${content.slice(0, 300)}`)
+
+  const parsed = JSON.parse(jsonMatch[1].trim())
+
+  // 배열로 반환된 경우 wrapping
+  if (Array.isArray(parsed)) {
+    return { tasks: parsed }
+  }
+
+  return parsed
 }
 
 function validateTasks(result: DecomposeResult): Task[] {
@@ -77,11 +99,19 @@ function validateTasks(result: DecomposeResult): Task[] {
   })
 }
 
-export function decompose(
+async function runAgent(cmd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync(cmd, args, {
+    timeout: 60000,
+    maxBuffer: 1024 * 1024,
+  })
+  return stdout
+}
+
+export async function decompose(
   userPrompt: string,
   context: string,
   decomposerAgent: AgentType
-): Task[] {
+): Promise<Task[]> {
   const fullPrompt = DECOMPOSE_PROMPT
     .replace('{{PROMPT}}', userPrompt)
     .replace('{{CONTEXT}}', context || 'No context available')
@@ -90,11 +120,7 @@ export function decompose(
 
   let output: string
   try {
-    output = execFileSync(cmd, args, {
-      timeout: 60000,
-      encoding: 'utf-8',
-      maxBuffer: 1024 * 1024,
-    })
+    output = await runAgent(cmd, args)
   } catch (err) {
     throw new Error(`Decomposer (${decomposerAgent}) failed: ${err instanceof Error ? err.message : 'unknown'}`)
   }
@@ -105,11 +131,7 @@ export function decompose(
   } catch {
     // 재시도 1회
     try {
-      output = execFileSync(cmd, args, {
-        timeout: 60000,
-        encoding: 'utf-8',
-        maxBuffer: 1024 * 1024,
-      })
+      output = await runAgent(cmd, args)
       result = parseJsonFromOutput(output)
     } catch (retryErr) {
       throw new Error(`Failed to parse decompose output after retry: ${retryErr instanceof Error ? retryErr.message : 'unknown'}`)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { AgentType } from '@llmmixer/core'
 import { getSessionManager, getProjectPath } from '@/lib/mixer-instance'
+import { requireAuth } from '@/lib/auth'
 
 export async function GET() {
   const manager = getSessionManager()
@@ -8,6 +9,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const authError = requireAuth(req)
+  if (authError) return authError
+
   const body = await req.json() as {
     taskId: string
     agentType: AgentType
@@ -42,6 +46,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const authError = requireAuth(req)
+  if (authError) return authError
+
   const { searchParams } = new URL(req.url)
   const taskId = searchParams.get('taskId')
 

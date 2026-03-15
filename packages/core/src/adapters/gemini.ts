@@ -18,54 +18,93 @@ export class GeminiAdapter extends AgentAdapter {
     /confirm/i,
   ]
 
-  protected autoRespondPatterns = [
-    // Trust folder 프롬프트 — 항상 자동 승인
-    { pattern: /Trust folder/i, response: 't' },
-    { pattern: /trust this folder/i, response: 't' },
-    { pattern: /Trusting a folder/i, response: 't' },
-  ]
+  private trustHandled = false
+  private authHandled = false
+  private promptSent = false
+  private outputAccum = ''
 
   spawn(prompt: string, options: SpawnOptions): void {
-    if (!pty) {
-      this.emit('output', 'Error: node-pty not installed\n')
-      this.setStatus('error')
-      return
-    }
-
     this.autoApprove = options.autoApprove
+    this.trustHandled = false
+    this.authHandled = false
+    this.promptSent = false
+    this.outputAccum = ''
 
     const args: string[] = []
     if (options.autoApprove) {
       args.push('--sandbox=none')
     }
 
-    const proc = pty.spawn(this.command, args, {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 40,
-      cwd: options.worktreePath,
-      env: process.env as Record<string, string>,
-    })
+    if (pty) {
+      const proc = pty.spawn(this.command, args, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 40,
+        cwd: options.worktreePath,
+        env: process.env as Record<string, string>,
+      })
 
-    this.ptyProcess = proc
-    this.setStatus('running')
+      this.ptyProcess = proc
+      this.setStatus('running')
 
-    // Gemini는 대화형 — 초기화 후 프롬프트 전달
-    let promptSent = false
-    proc.onData((data: string) => {
-      this.handleOutput(data)
+      proc.onData((data: string) => {
+        const clean = this.stripAnsi(data)
+        this.outputAccum += clean
 
-      // "Ready" 또는 프롬프트 입력 가능 상태 감지 후 프롬프트 전달
-      if (!promptSent && (/Ready/i.test(data) || />/i.test(data) || /Tips for/i.test(data))) {
-        promptSent = true
-        setTimeout(() => {
-          const p = this.ptyProcess as { write?: (d: string) => void }
-          p?.write?.(prompt + '\n')
-        }, 1000)
+        // Trust folder 프롬프트 — 번호 "1" + Enter 로 선택
+        if (!this.trustHandled && /Do you trust/i.test(this.outputAccum)) {
+          this.trustHandled = true
+          this.outputAccum = ''
+          setTimeout(() => {
+            const p = this.ptyProcess as { write?: (d: string) => void }
+            p?.write?.('1\r')
+          }, 800)
+          this.emit('output', data)
+          return
+        }
+
+        // 인증 프롬프트 — 번호 "1" + Enter 로 "Login with Google" 선택
+        if (!this.authHandled && /How would you like to authenticate/i.test(this.outputAccum)) {
+          this.authHandled = true
+          this.outputAccum = ''
+          setTimeout(() => {
+            const p = this.ptyProcess as { write?: (d: string) => void }
+            p?.write?.('1\r')
+          }, 800)
+          this.emit('output', data)
+          return
+        }
+
+        // "Waiting for auth" — 브라우저에서 인증 중, 대시보드에 알림
+        if (/Waiting for auth/i.test(clean)) {
+          this.setStatus('waiting')
+          this.emit('waiting', 'Gemini: Waiting for browser authentication. Complete login in your browser.')
+          this.emit('output', data)
+          return
+        }
+
+        this.handleOutput(data)
+
+        // Ready 감지 후 프롬프트 전달
+        if (!this.promptSent && /Ready/i.test(this.outputAccum)) {
+          this.promptSent = true
+          this.outputAccum = ''
+          setTimeout(() => {
+            const p = this.ptyProcess as { write?: (d: string) => void }
+            p?.write?.(prompt + '\n')
+          }, 1500)
+        }
+      })
+
+      proc.onExit(({ exitCode }: { exitCode: number }) => this.handleExit(exitCode))
+    } else {
+      // child_process fallback: stdin으로 프롬프트 전달
+      const proc = this.spawnChildProcess(this.command, args, options)
+      if (proc.stdin?.writable) {
+        proc.stdin.write(prompt + '\n')
+        proc.stdin.end()
       }
-    })
-
-    proc.onExit(({ exitCode }: { exitCode: number }) => this.handleExit(exitCode))
+    }
   }
 
   async isInstalled(): Promise<boolean> {

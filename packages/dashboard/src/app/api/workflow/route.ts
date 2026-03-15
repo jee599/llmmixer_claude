@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { execFileSync } from 'node:child_process'
 import type { AgentType, TemplateName } from '@llmmixer/core'
 import { getWorkflowEngine } from '@/lib/mixer-instance'
+import { requireAuth } from '@/lib/auth'
 
 function isCommandAvailable(cmd: string): boolean {
   try {
@@ -37,6 +38,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const authError = requireAuth(req)
+  if (authError) return authError
+
   const body = await req.json() as {
     prompt: string
     template: TemplateName
