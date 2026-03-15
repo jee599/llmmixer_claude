@@ -2,11 +2,13 @@ import { execFile } from 'node:child_process'
 import { AgentAdapter } from './base.js'
 import type { AgentType, SpawnOptions } from '../types.js'
 
-let pty: typeof import('node-pty') | null = null
-try {
-  pty = await import('node-pty')
-} catch {
-  // node-pty not available
+function getPty(): typeof import('node-pty') | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('node-pty') as typeof import('node-pty')
+  } catch {
+    return null
+  }
 }
 
 export class ClaudeAdapter extends AgentAdapter {
@@ -36,32 +38,37 @@ export class ClaudeAdapter extends AgentAdapter {
       args.push('--dangerously-skip-permissions')
     }
 
+    const pty = getPty()
     if (pty) {
-      const proc = pty.spawn(this.command, args, {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 40,
-        cwd: options.worktreePath,
-        env: process.env as Record<string, string>,
-      })
+      try {
+        const proc = pty.spawn(this.command, args, {
+          name: 'xterm-256color',
+          cols: 120,
+          rows: 40,
+          cwd: options.worktreePath,
+          env: process.env as Record<string, string>,
+        })
 
-      this.ptyProcess = proc
-      this.setStatus('running')
+        this.ptyProcess = proc
+        this.setStatus('running')
 
-      proc.onData((data: string) => {
-        this.handleOutput(data)
-        this.detectReadyAndSend(prompt, data)
-      })
+        proc.onData((data: string) => {
+          this.handleOutput(data)
+          this.detectReadyAndSend(prompt, data)
+        })
 
-      proc.onExit(({ exitCode }: { exitCode: number }) => {
-        if (this.readyTimeout) clearTimeout(this.readyTimeout)
-        this.handleExit(exitCode)
-      })
+        proc.onExit(({ exitCode }: { exitCode: number }) => {
+          if (this.readyTimeout) clearTimeout(this.readyTimeout)
+          this.handleExit(exitCode)
+        })
 
-      // 최대 10초 후 강제 전송
-      this.readyTimeout = setTimeout(() => {
-        this.deliverPrompt(prompt)
-      }, 10000)
+        this.readyTimeout = setTimeout(() => {
+          this.deliverPrompt(prompt)
+        }, 10000)
+      } catch (err) {
+        this.emit('output', `PTY spawn error: ${err instanceof Error ? err.message : String(err)}\n`)
+        this.setStatus('error')
+      }
     } else {
       // child_process fallback: -p 플래그로 프롬프트 직접 전달
       const cpArgs = [...args, '-p', prompt]

@@ -9,7 +9,13 @@ export abstract class AgentAdapter extends EventEmitter {
   abstract readonly waitingPatterns: RegExp[]
 
   // 자동으로 응답해야 하는 패턴 (trust 프롬프트 등)
-  protected autoRespondPatterns: Array<{ pattern: RegExp; response: string }> = []
+  // 모든 CLI 공통: trust/workspace 확인 → Enter 또는 "y"로 자동 승인
+  protected autoRespondPatterns: Array<{ pattern: RegExp; response: string }> = [
+    { pattern: /Do you trust/i, response: '\r' },
+    { pattern: /Trust folder/i, response: '\r' },
+    { pattern: /trust this folder/i, response: '\r' },
+    { pattern: /Press enter to continue/i, response: '\r' },
+  ]
 
   protected ptyProcess: unknown = null
   protected childProcess: ChildProcess | null = null
@@ -78,11 +84,12 @@ export abstract class AgentAdapter extends EventEmitter {
     return proc
   }
 
-  sendInput(text: string): void {
+  sendInput(text: string, raw = false): void {
+    const suffix = raw ? '' : '\n'
     // PTY mode
     const pty = this.ptyProcess as { write?: (data: string) => void }
     if (pty?.write) {
-      pty.write(text + '\n')
+      pty.write(text + suffix)
       if (this._status === 'waiting') {
         this.setStatus('running')
       }
@@ -91,7 +98,7 @@ export abstract class AgentAdapter extends EventEmitter {
 
     // child_process fallback mode
     if (this.childProcess?.stdin?.writable) {
-      this.childProcess.stdin.write(text + '\n')
+      this.childProcess.stdin.write(text + suffix)
       if (this._status === 'waiting') {
         this.setStatus('running')
       }
@@ -144,6 +151,7 @@ export abstract class AgentAdapter extends EventEmitter {
   }
 
   protected handleOutput(data: string): void {
+    try {
     this.outputBuffer.push(data)
     this.emit('output', data)
 
@@ -154,7 +162,7 @@ export abstract class AgentAdapter extends EventEmitter {
       if (pattern.test(clean)) {
         const key = `auto:${pattern.source}`
         if (this.isDuplicate(key)) continue
-        setTimeout(() => this.sendInput(response), 500)
+        setTimeout(() => this.sendInput(response, true), 500)
         return
       }
     }
@@ -180,6 +188,10 @@ export abstract class AgentAdapter extends EventEmitter {
         this.emit('waiting', clean.trim())
         return
       }
+    }
+    } catch (err) {
+      // handleOutput 내부 에러를 삼키지 않고 output으로 전달
+      this.emit('output', `[internal error] ${err instanceof Error ? err.message : String(err)}\n`)
     }
   }
 

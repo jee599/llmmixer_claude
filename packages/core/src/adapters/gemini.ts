@@ -2,11 +2,13 @@ import { execFile } from 'node:child_process'
 import { AgentAdapter } from './base.js'
 import type { AgentType, SpawnOptions } from '../types.js'
 
-let pty: typeof import('node-pty') | null = null
-try {
-  pty = await import('node-pty')
-} catch {
-  // node-pty not available
+function getPty(): typeof import('node-pty') | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('node-pty') as typeof import('node-pty')
+  } catch {
+    return null
+  }
 }
 
 export class GeminiAdapter extends AgentAdapter {
@@ -35,6 +37,7 @@ export class GeminiAdapter extends AgentAdapter {
       args.push('--sandbox=none')
     }
 
+    const pty = getPty()
     if (pty) {
       const proc = pty.spawn(this.command, args, {
         name: 'xterm-256color',

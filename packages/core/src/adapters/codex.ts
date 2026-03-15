@@ -2,11 +2,13 @@ import { execFile } from 'node:child_process'
 import { AgentAdapter } from './base.js'
 import type { AgentType, SpawnOptions } from '../types.js'
 
-let pty: typeof import('node-pty') | null = null
-try {
-  pty = await import('node-pty')
-} catch {
-  // node-pty not available
+function getPty(): typeof import('node-pty') | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('node-pty') as typeof import('node-pty')
+  } catch {
+    return null
+  }
 }
 
 export class CodexAdapter extends AgentAdapter {
@@ -24,37 +26,33 @@ export class CodexAdapter extends AgentAdapter {
 
     const args: string[] = []
     if (options.autoApprove) {
-      args.push('--approval-mode', 'full-auto')
+      args.push('-a', 'never')
     }
-    // 프롬프트를 CLI arg로 전달하지 않음 (ARG_MAX 한계)
-    // stdin으로 전달
+    args.push(prompt)
 
+    const pty = getPty()
     if (pty) {
-      const proc = pty.spawn(this.command, args, {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 40,
-        cwd: options.worktreePath,
-        env: process.env as Record<string, string>,
-      })
+      try {
+        const proc = pty.spawn(this.command, args, {
+          name: 'xterm-256color',
+          cols: 120,
+          rows: 40,
+          cwd: options.worktreePath,
+          env: process.env as Record<string, string>,
+        })
 
-      this.ptyProcess = proc
-      this.setStatus('running')
+        this.ptyProcess = proc
+        this.setStatus('running')
 
-      // stdin으로 프롬프트 전달
-      setTimeout(() => {
-        proc.write(prompt + '\n')
-      }, 500)
-
-      proc.onData((data: string) => this.handleOutput(data))
-      proc.onExit(({ exitCode }: { exitCode: number }) => this.handleExit(exitCode))
-    } else {
-      // child_process fallback: stdin으로 프롬프트 전달
-      const proc = this.spawnChildProcess(this.command, args, options)
-      if (proc.stdin?.writable) {
-        proc.stdin.write(prompt + '\n')
-        proc.stdin.end()
+        proc.onData((data: string) => this.handleOutput(data))
+        proc.onExit(({ exitCode }: { exitCode: number }) => this.handleExit(exitCode))
+      } catch (err) {
+        this.emit('output', `PTY spawn error: ${err instanceof Error ? err.message : String(err)}\n`)
+        this.setStatus('error')
       }
+    } else {
+      // child_process fallback
+      this.spawnChildProcess(this.command, ['exec', ...args], options)
     }
   }
 

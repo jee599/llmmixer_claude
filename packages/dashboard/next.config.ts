@@ -4,6 +4,7 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   transpilePackages: ['@llmmixer/core'],
   outputFileTracingRoot: path.join(import.meta.dirname, '../../'),
+  serverExternalPackages: ['node-pty'],
 }
 
 export default nextConfig
