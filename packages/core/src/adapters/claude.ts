@@ -1,6 +1,13 @@
-import { spawn, execFile } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { AgentAdapter } from './base.js'
 import type { AgentType, SpawnOptions } from '../types.js'
+
+let pty: typeof import('node-pty') | null = null
+try {
+  pty = await import('node-pty')
+} catch {
+  // node-pty not available
+}
 
 export class ClaudeAdapter extends AgentAdapter {
   readonly name: AgentType = 'claude'
@@ -16,49 +23,49 @@ export class ClaudeAdapter extends AgentAdapter {
   ]
 
   spawn(prompt: string, options: SpawnOptions): void {
-    // -p (print) 모드: 프롬프트를 인수로 전달, stdout으로 결과 출력
-    // 대화형 모드는 PTY 필요 → 향후 node-pty로 전환 예정
-    const args = ['-p', prompt]
-
-    if (options.autoApprove) {
-      args.unshift('--dangerously-skip-permissions')
+    if (!pty) {
+      this.emit('output', 'Error: node-pty not installed\n')
+      this.setStatus('error')
+      return
     }
 
-    this.proc = spawn(this.command, args, {
+    this.autoApprove = options.autoApprove
+
+    const args: string[] = []
+    if (options.autoApprove) {
+      args.push('--dangerously-skip-permissions')
+    }
+
+    const proc = pty.spawn(this.command, args, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 40,
       cwd: options.worktreePath,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: process.env as Record<string, string>,
     })
 
+    this.ptyProcess = proc
     this.setStatus('running')
 
-    this.proc.stdout?.on('data', (data: Buffer) => this.handleStdout(data))
-    this.proc.stderr?.on('data', (data: Buffer) => {
-      this.emit('output', data.toString())
-    })
-    this.proc.on('exit', (code) => this.handleExit(code))
-    this.proc.on('error', (err) => {
-      this.emit('output', `Error: ${err.message}\n`)
-      this.setStatus('error')
-    })
+    // 프롬프트 전달 — Claude가 초기화된 후 전송
+    setTimeout(() => {
+      proc.write(prompt + '\n')
+    }, 2000)
+
+    proc.onData((data: string) => this.handleOutput(data))
+    proc.onExit(({ exitCode }: { exitCode: number }) => this.handleExit(exitCode))
   }
 
   async isInstalled(): Promise<boolean> {
     return new Promise((resolve) => {
-      execFile('which', [this.command], (error) => {
-        resolve(!error)
-      })
+      execFile('which', [this.command], (error) => resolve(!error))
     })
   }
 
   async getVersion(): Promise<string | null> {
     return new Promise((resolve) => {
       execFile(this.command, ['--version'], (error, stdout) => {
-        if (error) {
-          resolve(null)
-          return
-        }
-        resolve(stdout.trim())
+        resolve(error ? null : stdout.trim())
       })
     })
   }

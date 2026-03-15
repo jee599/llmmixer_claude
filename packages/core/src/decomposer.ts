@@ -35,16 +35,21 @@ function buildCliCommand(agent: AgentType, prompt: string): string[] {
     case 'claude':
       return ['claude', '-p', prompt]
     case 'codex':
-      return ['codex', '-q', prompt]
+      return ['codex', 'exec', prompt]
     case 'gemini':
       return ['gemini', '-p', prompt]
   }
 }
 
 function parseJsonFromOutput(output: string): DecomposeResult {
-  // LLM 출력에서 JSON 추출 — ```json 블록이나 순수 JSON
-  const jsonMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/) ?? output.match(/(\{[\s\S]*\})/)
-  if (!jsonMatch) throw new Error('No JSON found in LLM output')
+  // codex exec 출력에서 실제 응답 부분만 추출 (헤더 제거)
+  // codex 포맷: "--------\nuser\n...\ncodex\n{실제 응답}\ntokens used\n..."
+  const codexMatch = output.match(/codex\n([\s\S]*?)(?:\ntokens used|\n?$)/)
+  const content = codexMatch ? codexMatch[1].trim() : output
+
+  // ```json 블록 또는 순수 JSON 추출
+  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) ?? content.match(/(\{[\s\S]*\})/)
+  if (!jsonMatch) throw new Error(`No JSON found in LLM output:\n${content.slice(0, 200)}`)
 
   return JSON.parse(jsonMatch[1].trim())
 }

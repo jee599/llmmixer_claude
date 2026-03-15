@@ -1,6 +1,13 @@
-import { spawn, execFile } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { AgentAdapter } from './base.js'
 import type { AgentType, SpawnOptions } from '../types.js'
+
+let pty: typeof import('node-pty') | null = null
+try {
+  pty = await import('node-pty')
+} catch {
+  // node-pty not available
+}
 
 export class CodexAdapter extends AgentAdapter {
   readonly name: AgentType = 'codex'
@@ -13,50 +20,45 @@ export class CodexAdapter extends AgentAdapter {
   ]
 
   spawn(prompt: string, options: SpawnOptions): void {
-    // exec (non-interactive) 모드
-    const args = ['exec']
-
-    if (options.autoApprove) {
-      args.push('--config', 'approval=never')
+    if (!pty) {
+      this.emit('output', 'Error: node-pty not installed\n')
+      this.setStatus('error')
+      return
     }
 
+    this.autoApprove = options.autoApprove
+
+    const args: string[] = []
+    if (options.autoApprove) {
+      args.push('--approval-mode', 'full-auto')
+    }
     args.push(prompt)
 
-    this.proc = spawn(this.command, args, {
+    const proc = pty.spawn(this.command, args, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 40,
       cwd: options.worktreePath,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: process.env as Record<string, string>,
     })
 
+    this.ptyProcess = proc
     this.setStatus('running')
 
-    this.proc.stdout?.on('data', (data: Buffer) => this.handleStdout(data))
-    this.proc.stderr?.on('data', (data: Buffer) => {
-      this.emit('output', data.toString())
-    })
-    this.proc.on('exit', (code) => this.handleExit(code))
-    this.proc.on('error', (err) => {
-      this.emit('output', `Error: ${err.message}\n`)
-      this.setStatus('error')
-    })
+    proc.onData((data: string) => this.handleOutput(data))
+    proc.onExit(({ exitCode }: { exitCode: number }) => this.handleExit(exitCode))
   }
 
   async isInstalled(): Promise<boolean> {
     return new Promise((resolve) => {
-      execFile('which', [this.command], (error) => {
-        resolve(!error)
-      })
+      execFile('which', [this.command], (error) => resolve(!error))
     })
   }
 
   async getVersion(): Promise<string | null> {
     return new Promise((resolve) => {
       execFile(this.command, ['--version'], (error, stdout) => {
-        if (error) {
-          resolve(null)
-          return
-        }
-        resolve(stdout.trim())
+        resolve(error ? null : stdout.trim())
       })
     })
   }

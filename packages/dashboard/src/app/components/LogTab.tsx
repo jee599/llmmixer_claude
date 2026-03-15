@@ -91,10 +91,13 @@ export default function LogTab({ logs, sessions, waitingMap, onApprove, onKill }
 
         <div className="flex-1 overflow-y-auto">
           {sessions.map((s) => (
-            <button
+            <div
               key={s.taskId}
               onClick={() => setActiveTaskId(s.taskId)}
-              className={`w-full px-3 py-2 text-left border-b border-gray-800/50 transition-colors group ${
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && setActiveTaskId(s.taskId)}
+              className={`w-full px-3 py-2 text-left border-b border-gray-800/50 transition-colors group cursor-pointer ${
                 activeTaskId === s.taskId ? 'bg-gray-800' : 'hover:bg-gray-900'
               }`}
             >
@@ -121,7 +124,7 @@ export default function LogTab({ logs, sessions, waitingMap, onApprove, onKill }
                   {s.status}
                 </span>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       </div>

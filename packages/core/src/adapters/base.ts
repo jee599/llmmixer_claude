@@ -1,29 +1,25 @@
-import { ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import type { AgentType, TaskStatus, SpawnOptions } from '../types.js'
-
-export interface AdapterEvents {
-  output: (data: string) => void
-  waiting: (pattern: string) => void
-  status: (status: TaskStatus) => void
-  exit: (code: number | null) => void
-}
 
 export abstract class AgentAdapter extends EventEmitter {
   abstract readonly name: AgentType
   abstract readonly command: string
   abstract readonly waitingPatterns: RegExp[]
 
-  protected proc: ChildProcess | null = null
+  // 자동으로 응답해야 하는 패턴 (trust 프롬프트 등)
+  protected autoRespondPatterns: Array<{ pattern: RegExp; response: string }> = []
+
+  protected ptyProcess: unknown = null
   protected _status: TaskStatus = 'pending'
   protected outputBuffer: string[] = []
+  protected autoApprove = false
 
   get status(): TaskStatus {
     return this._status
   }
 
   get pid(): number | undefined {
-    return this.proc?.pid
+    return (this.ptyProcess as { pid?: number })?.pid
   }
 
   protected setStatus(status: TaskStatus): void {
@@ -34,21 +30,19 @@ export abstract class AgentAdapter extends EventEmitter {
   abstract spawn(prompt: string, options: SpawnOptions): void
 
   sendInput(text: string): void {
-    if (!this.proc?.stdin?.writable) return
-    this.proc.stdin.write(text + '\n')
-    if (this._status === 'waiting') {
-      this.setStatus('running')
+    const pty = this.ptyProcess as { write?: (data: string) => void }
+    if (pty?.write) {
+      pty.write(text + '\n')
+      if (this._status === 'waiting') {
+        this.setStatus('running')
+      }
     }
   }
 
   kill(): void {
-    if (this.proc && !this.proc.killed) {
-      this.proc.kill('SIGTERM')
-      setTimeout(() => {
-        if (this.proc && !this.proc.killed) {
-          this.proc.kill('SIGKILL')
-        }
-      }, 5000)
+    const pty = this.ptyProcess as { kill?: (signal?: string) => void }
+    if (pty?.kill) {
+      pty.kill()
     }
     this.setStatus('error')
   }
@@ -56,22 +50,40 @@ export abstract class AgentAdapter extends EventEmitter {
   abstract isInstalled(): Promise<boolean>
   abstract getVersion(): Promise<string | null>
 
-  protected handleStdout(data: Buffer): void {
-    const text = data.toString()
-    this.outputBuffer.push(text)
-    this.emit('output', text)
+  protected handleOutput(data: string): void {
+    this.outputBuffer.push(data)
+    this.emit('output', data)
 
+    // 자동 응답 패턴 체크 (trust 프롬프트 등)
+    for (const { pattern, response } of this.autoRespondPatterns) {
+      if (pattern.test(data)) {
+        setTimeout(() => this.sendInput(response), 500)
+        return
+      }
+    }
+
+    // autoApprove 모드면 승인 패턴도 자동 응답
+    if (this.autoApprove) {
+      for (const pattern of this.waitingPatterns) {
+        if (pattern.test(data)) {
+          setTimeout(() => this.sendInput('y'), 500)
+          return
+        }
+      }
+    }
+
+    // 승인 대기 패턴 체크
     for (const pattern of this.waitingPatterns) {
-      if (pattern.test(text)) {
+      if (pattern.test(data)) {
         this.setStatus('waiting')
-        this.emit('waiting', text.trim())
+        this.emit('waiting', data.trim())
         return
       }
     }
   }
 
-  protected handleExit(code: number | null): void {
-    this.proc = null
+  protected handleExit(code: number): void {
+    this.ptyProcess = null
     if (this._status !== 'error') {
       this.setStatus(code === 0 ? 'complete' : 'error')
     }

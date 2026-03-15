@@ -17,7 +17,7 @@ import { SessionManager } from './session-manager.js'
 import { createWorktree } from './worktree.js'
 
 const DEFAULT_CONFIG: MixerConfig = {
-  decomposer: 'claude',
+  decomposer: 'codex',
   maxAgents: 6,
   timeout: 300,
   autoApprove: false,

@@ -27,9 +27,10 @@ function generateTaskId(agentType: string): string {
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabName>('log')
   const [isRunning, setIsRunning] = useState(false)
-  const [mode, setMode] = useState<'single' | 'workflow'>('single')
-  const [template, setTemplate] = useState<TemplateName>('quick')
+  const [mode, setMode] = useState<'single' | 'workflow'>('workflow')
+  const [template, setTemplate] = useState<TemplateName>('auto')
   const [autoApprove, setAutoApprove] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<{ type: 'info' | 'error'; text: string } | null>(null)
 
   const { logs, sessions, waitingMap, workflow, setWorkflow, clearWaiting, clearAll } = useSSE(autoApprove)
 
@@ -46,45 +47,65 @@ export default function Dashboard() {
     await fetch(`/api/sessions?taskId=${taskId}`, { method: 'DELETE' })
   }, [])
 
-  const handleSingleSubmit = useCallback(async (prompt: string, agentType: AgentType) => {
+  const handleSubmit = useCallback(async (prompt: string, agentType: AgentType) => {
     setIsRunning(true)
-    const taskId = generateTaskId(agentType)
-    try {
-      await fetch('/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId, agentType, prompt, autoApprove }),
-      })
-    } catch (err) {
-      console.error('Failed to start session:', err)
-    } finally {
-      setIsRunning(false)
-    }
-  }, [autoApprove])
+    setStatusMessage(null)
 
-  const handleWorkflowSubmit = useCallback(async (prompt: string, _agentType?: AgentType) => {
-    setIsRunning(true)
-    setActiveTab('flow')
-    try {
-      const res = await fetch('/api/workflow', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, template, autoApprove }),
-      })
-      const data = await res.json()
-      if (data.workflow) setWorkflow(data.workflow)
-    } catch (err) {
-      console.error('Failed to start workflow:', err)
-    } finally {
-      setIsRunning(false)
+    if (mode === 'workflow') {
+      setActiveTab('flow')
+      setStatusMessage({ type: 'info', text: 'Decomposing tasks with Codex...' })
+
+      try {
+        const res = await fetch('/api/workflow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, template, autoApprove }),
+        })
+        const data = await res.json()
+        if (data.error) {
+          setStatusMessage({ type: 'error', text: data.error })
+        } else if (data.workflow) {
+          setWorkflow(data.workflow)
+          const taskCount = data.workflow.tasks?.length ?? 0
+          setStatusMessage({ type: 'info', text: `${taskCount} tasks created. Running...` })
+          setTimeout(() => setStatusMessage(null), 5000)
+        }
+      } catch (err) {
+        setStatusMessage({ type: 'error', text: `Failed: ${err instanceof Error ? err.message : 'Unknown error'}` })
+      }
+    } else {
+      setStatusMessage({ type: 'info', text: `Starting ${agentType} session...` })
+      const taskId = generateTaskId(agentType)
+      try {
+        const res = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId, agentType, prompt, autoApprove }),
+        })
+        const data = await res.json()
+        if (data.error) {
+          setStatusMessage({ type: 'error', text: data.error })
+        } else {
+          setStatusMessage({ type: 'info', text: `Session ${taskId} started` })
+          setTimeout(() => setStatusMessage(null), 3000)
+        }
+      } catch (err) {
+        setStatusMessage({ type: 'error', text: `Failed: ${err instanceof Error ? err.message : 'Unknown error'}` })
+      }
     }
-  }, [template, autoApprove, setWorkflow])
+
+    setIsRunning(false)
+  }, [mode, template, autoApprove, setWorkflow])
 
   const handleNuke = useCallback(async () => {
     if (!confirm('Kill all sessions and clean up?')) return
     await fetch('/api/nuke', { method: 'POST' })
     clearAll()
+    setStatusMessage(null)
   }, [clearAll])
+
+  // 활성 세션 수
+  const runningSessions = sessions.filter((s) => s.status === 'running' || s.status === 'waiting').length
 
   return (
     <div className="flex flex-col h-screen">
@@ -104,6 +125,9 @@ export default function Dashboard() {
                 }`}
               >
                 {tab.label}
+                {tab.name === 'log' && runningSessions > 0 && (
+                  <span className="ml-1.5 inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+                )}
               </button>
             ))}
           </nav>
@@ -118,39 +142,6 @@ export default function Dashboard() {
             />
             Auto-approve
           </label>
-          <div className="flex items-center gap-2 text-xs">
-            <label className="flex items-center gap-1.5 text-gray-400 cursor-pointer">
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === 'single'}
-                onChange={() => setMode('single')}
-              />
-              Single
-            </label>
-            <label className="flex items-center gap-1.5 text-gray-400 cursor-pointer">
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === 'workflow'}
-                onChange={() => setMode('workflow')}
-              />
-              Workflow
-            </label>
-            {mode === 'workflow' && (
-              <select
-                value={template}
-                onChange={(e) => setTemplate(e.target.value as TemplateName)}
-                className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
-              >
-                <option value="auto">Auto</option>
-                <option value="full">Full</option>
-                <option value="quick">Quick</option>
-                <option value="review">Review</option>
-                <option value="docs">Docs</option>
-              </select>
-            )}
-          </div>
           <button
             onClick={handleNuke}
             className="px-3 py-1 text-xs text-red-400 border border-red-900 rounded hover:bg-red-950 transition-colors"
@@ -159,6 +150,27 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
+
+      {/* 상태 메시지 바 */}
+      {statusMessage && (
+        <div className={`px-4 py-2 text-sm flex items-center gap-2 ${
+          statusMessage.type === 'error'
+            ? 'bg-red-950/50 text-red-300 border-b border-red-900/50'
+            : 'bg-blue-950/50 text-blue-300 border-b border-blue-900/50'
+        }`}>
+          {statusMessage.type === 'info' && isRunning && (
+            <span className="inline-block w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+          )}
+          {statusMessage.type === 'error' && <span>✗</span>}
+          {statusMessage.text}
+          <button
+            onClick={() => setStatusMessage(null)}
+            className="ml-auto text-xs opacity-50 hover:opacity-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* 탭 콘텐츠 */}
       <div className="flex-1 overflow-hidden relative">
@@ -174,7 +186,9 @@ export default function Dashboard() {
         {activeTab === 'flow' && (
           <FlowTab
             workflow={workflow}
+            waitingMap={waitingMap}
             onNodeClick={() => setActiveTab('log')}
+            onApprove={handleApprove}
           />
         )}
         {activeTab === 'results' && (
@@ -187,7 +201,11 @@ export default function Dashboard() {
 
       {/* 프롬프트 입력 */}
       <PromptInput
-        onSubmit={mode === 'workflow' ? handleWorkflowSubmit : handleSingleSubmit}
+        mode={mode}
+        template={template}
+        onModeChange={setMode}
+        onTemplateChange={setTemplate}
+        onSubmit={handleSubmit}
         disabled={isRunning}
       />
     </div>
