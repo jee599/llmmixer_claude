@@ -1,0 +1,42 @@
+{
+  "name": "full",
+  "description": "Full workflow: research → design → scaffold → implement → review → docs",
+  "tasks": [
+    {
+      "id": "t1",
+      "type": "research",
+      "promptTemplate": "Research best practices and existing solutions for: {{prompt}}",
+      "dependsOn": []
+    },
+    {
+      "id": "t2",
+      "type": "design",
+      "promptTemplate": "Design the architecture and implementation plan for: {{prompt}}\n\nResearch findings:\n{{t1.output}}",
+      "dependsOn": ["t1"]
+    },
+    {
+      "id": "t3",
+      "type": "scaffold",
+      "promptTemplate": "Create the project scaffold based on this design:\n{{t2.output}}",
+      "dependsOn": ["t2"]
+    },
+    {
+      "id": "t4",
+      "type": "implement",
+      "promptTemplate": "Implement the full feature based on this design:\n{{t2.output}}\n\nScaffold is already in place.",
+      "dependsOn": ["t3"]
+    },
+    {
+      "id": "t5",
+      "type": "review",
+      "promptTemplate": "Review the implementation for bugs, security issues, and improvements:\n{{t4.output}}",
+      "dependsOn": ["t4"]
+    },
+    {
+      "id": "t6",
+      "type": "docs",
+      "promptTemplate": "Write documentation (README, API docs) for the implemented feature:\n{{t4.output}}",
+      "dependsOn": ["t4"]
+    }
+  ]
+}

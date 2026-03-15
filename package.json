@@ -1,0 +1,23 @@
+{
+  "name": "llmmixer",
+  "version": "0.3.0",
+  "description": "Multi-LLM session manager with web dashboard",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "bin": {
+    "llmmixer": "./bin/llmmixer.js"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=packages/dashboard",
+    "build": "npm run build:core && npm run build:dashboard",
+    "build:core": "npm run build --workspace=packages/core",
+    "build:dashboard": "npm run build --workspace=packages/dashboard",
+    "test": "vitest"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

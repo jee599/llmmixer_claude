@@ -1,0 +1,18 @@
+{
+  "name": "quick",
+  "description": "Quick workflow: design → implement",
+  "tasks": [
+    {
+      "id": "t1",
+      "type": "design",
+      "promptTemplate": "Briefly design the approach for: {{prompt}}",
+      "dependsOn": []
+    },
+    {
+      "id": "t2",
+      "type": "implement",
+      "promptTemplate": "Implement based on this design:\n{{t1.output}}",
+      "dependsOn": ["t1"]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "docs",
+  "description": "Documentation workflow: research → docs",
+  "tasks": [
+    {
+      "id": "t1",
+      "type": "research",
+      "promptTemplate": "Research the topic thoroughly: {{prompt}}",
+      "dependsOn": []
+    },
+    {
+      "id": "t2",
+      "type": "docs",
+      "promptTemplate": "Write comprehensive documentation based on research:\n{{t1.output}}\n\nOriginal request: {{prompt}}",
+      "dependsOn": ["t1"]
+    }
+  ]
+}

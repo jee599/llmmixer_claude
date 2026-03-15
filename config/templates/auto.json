@@ -1,0 +1,5 @@
+{
+  "name": "auto",
+  "description": "Auto workflow: LLM decomposes the prompt into tasks",
+  "tasks": []
+}

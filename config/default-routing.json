@@ -1,0 +1,8 @@
+{
+  "design": "claude",
+  "review": "claude",
+  "implement": "codex",
+  "scaffold": "codex",
+  "research": "gemini",
+  "docs": "gemini"
+}
